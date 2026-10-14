@@ -91,6 +91,30 @@ internal static class Program
         Check(selected == "nihao", "selection was " + (selected ?? "<null>"));
         Check(InputSender.ClearEdit(box.Handle), "clear");
         Check(box.Text == "前缀后缀", "after clear: " + box.Text);
+
+        using var rich = new RichTextBox { Multiline = true };
+        var word = "birushuoxianzaizhezhongqingkuang";
+        rich.Text = "你好" + Environment.NewLine + word + Environment.NewLine + "结尾";
+        _ = rich.Handle;
+        var at = rich.Text.IndexOf(word, StringComparison.Ordinal);
+        rich.Select(at, word.Length);
+        var richSelected = SelectionReader.ReadEditControl(rich.Handle);
+        Check(richSelected == word, "rich selection was " + (richSelected ?? "<null>"));
+        rich.Select(at, word.Length + 1);
+        var withBreak = SelectionReader.ReadEditControl(rich.Handle);
+        Check(withBreak == word, "rich trailing break was " + (withBreak ?? "<null>"));
+
+        var stability = new SelectionStability();
+        Check(!stability.IsStable("bi"), "first read is not stable");
+        Check(!stability.IsStable("biru"), "growing read is not stable");
+        Check(stability.IsStable("biru"), "same read is stable");
+        Check(SelectionStability.Prefer("qingkua", "qingkuang") == "qingkuang", "prefer longer");
+        Check(SelectionStability.Prefer("qingkuang", "huo") == "huo", "prefer latest when different");
+
+        var plain = "你好\r\n" + word;
+        Check(SelectionReader.RichIndexToPlain(plain, 3) == 4, "rich index skips extra newline");
+        Check(SelectionReader.SliceRichEdit(plain, 3, 3 + word.Length) == word, "slice after newline");
+        Check(SelectionReader.SliceRichEdit(word, 0, word.Length) == word, "slice without newline");
     }
 
     private static void TestSettingsForm()

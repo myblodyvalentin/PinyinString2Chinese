@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Windows.Automation;
 
 namespace PinyinString2Chinese;
@@ -36,10 +37,39 @@ internal readonly record struct SelectionAttempt(CapturedText? Text, SelectionFo
     internal static SelectionAttempt Stop() => new(null, SelectionFollow.Stop);
 }
 
+internal sealed class SelectionStability
+{
+    private string? _previous;
+
+    internal bool IsStable(string text)
+    {
+        var stable = _previous == text;
+        _previous = text;
+        return stable;
+    }
+
+    internal static string Prefer(string earlier, string later)
+    {
+        if (later.StartsWith(earlier, StringComparison.Ordinal) && later.Length >= earlier.Length)
+            return later;
+
+        if (earlier.StartsWith(later, StringComparison.Ordinal) && earlier.Length > later.Length)
+            return earlier;
+
+        return later;
+    }
+}
+
 internal static class SelectionReader
 {
-    internal static string? ReadEditControl(IntPtr hwnd) =>
-        ReadEditSelection(new ForegroundProbe(hwnd, hwnd, 0, 0, "Edit", ""));
+    internal static string? ReadEditControl(IntPtr hwnd)
+    {
+        var name = new System.Text.StringBuilder(256);
+        if (NativeMethods.GetClassName(hwnd, name, name.Capacity) <= 0)
+            name.Clear();
+
+        return ReadEditSelection(new ForegroundProbe(hwnd, hwnd, 0, 0, name.ToString(), ""));
+    }
 
     internal static SelectionAttempt TryRead(bool allowClipboard, bool allowSelf = false)
     {
@@ -116,6 +146,11 @@ internal static class SelectionReader
 
     private static string? ReadEditSelection(ForegroundProbe probe)
     {
+        // 记事本的 RichEdit 把换行存成一个字符，WM_GETTEXT 却展开成两个。
+        // 用 EM_GETSEL 的下标去切 WM_GETTEXT，会切到别的字，或因为越界而读不到。
+        if (IsRichEdit(probe.ClassName))
+            return ReadRichEditSelection(probe.FocusHwnd);
+
         var start = 0;
         var end = 0;
         NativeMethods.SendMessageSel(probe.FocusHwnd, NativeMethods.EmGetSel, ref start, ref end);
@@ -145,7 +180,113 @@ internal static class SelectionReader
         if (end > content.Length)
             return null;
 
-        return content[start..end];
+        return NormalizeSelection(content[start..end]);
+    }
+
+    private static bool IsRichEdit(string className) =>
+        className.Contains("RichEdit", StringComparison.OrdinalIgnoreCase);
+
+    private static string? ReadRichEditSelection(IntPtr hwnd)
+    {
+        var ranged = ReadRichEditRange(hwnd);
+        if (ranged != null)
+            return ranged;
+
+        var start = 0;
+        var end = 0;
+        NativeMethods.SendMessageSel(hwnd, NativeMethods.EmGetSel, ref start, ref end);
+        var plain = ReadPlainText(hwnd);
+        return plain == null ? null : SliceRichEdit(plain, start, end);
+    }
+
+    private static string? ReadRichEditRange(IntPtr hwnd)
+    {
+        var range = new NativeMethods.CHARRANGE();
+        NativeMethods.SendMessageCharRange(hwnd, NativeMethods.EmExGetSel, IntPtr.Zero, ref range);
+        if (range.Max <= range.Min)
+            return null;
+
+        var length = range.Max - range.Min;
+        if (length > PinyinParser.MaxLetters + 8)
+            return null;
+
+        var bytes = (length + 1) * 2;
+        var buffer = Marshal.AllocHGlobal(bytes);
+        try
+        {
+            var zeros = new byte[bytes];
+            Marshal.Copy(zeros, 0, buffer, bytes);
+            var textRange = new NativeMethods.TEXTRANGEW
+            {
+                Range = range,
+                Text = buffer,
+            };
+            var copied = NativeMethods.SendMessageTextRange(
+                hwnd,
+                NativeMethods.EmGetTextRange,
+                IntPtr.Zero,
+                ref textRange).ToInt32();
+            if (copied <= 0)
+                return null;
+
+            var text = Marshal.PtrToStringUni(buffer, Math.Min(copied, length)) ?? "";
+            return NormalizeSelection(text);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    private static string? ReadPlainText(IntPtr hwnd)
+    {
+        var total = NativeMethods.SendMessage(
+            hwnd,
+            NativeMethods.WmGetTextLength,
+            IntPtr.Zero,
+            IntPtr.Zero).ToInt32();
+        if (total <= 0)
+            return null;
+
+        var builder = new System.Text.StringBuilder(total + 1);
+        NativeMethods.SendMessageText(hwnd, NativeMethods.WmGetText, (IntPtr)builder.Capacity, builder);
+        return builder.ToString();
+    }
+
+    internal static string? SliceRichEdit(string plain, int richStart, int richEnd)
+    {
+        if (richEnd <= richStart || richStart < 0)
+            return null;
+
+        var start = RichIndexToPlain(plain, richStart);
+        var end = RichIndexToPlain(plain, richEnd);
+        if (start < 0 || end < start || end > plain.Length)
+            return null;
+
+        return NormalizeSelection(plain[start..end]);
+    }
+
+    internal static int RichIndexToPlain(string plain, int richIndex)
+    {
+        var rich = 0;
+        for (var i = 0; i < plain.Length; i++)
+        {
+            if (plain[i] == '\n' && i > 0 && plain[i - 1] == '\r')
+                continue;
+
+            if (rich == richIndex)
+                return i;
+
+            rich++;
+        }
+
+        return rich == richIndex ? plain.Length : -1;
+    }
+
+    private static string? NormalizeSelection(string text)
+    {
+        var trimmed = text.TrimEnd('\r', '\n', '\0');
+        return trimmed.Length == 0 ? null : trimmed;
     }
 
     private static UiaRead ReadUia(IntPtr hwnd)

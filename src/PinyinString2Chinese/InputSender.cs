@@ -50,10 +50,16 @@ internal static class InputSender
 
     internal static void ReleaseChordKeys()
     {
-        Send([Key('C', keyUp: true, extended: false)]);
-        Send([Key(NativeMethods.VkControl, keyUp: true, extended: false)]);
-        Send([Key(NativeMethods.VkShift, keyUp: true, extended: false)]);
-        Send([Key(NativeMethods.VkMenu, keyUp: true, extended: false)]);
+        // 不能补发 Alt 松开。系统会把它当成按了一下 Alt，菜单被激活，
+        // 接下来的字母就变成快捷键，例如 V 会打开记事本的「查看」。
+        ReleaseIfDown('C');
+        ReleaseIfDown(NativeMethods.VkControl);
+    }
+
+    private static void ReleaseIfDown(int virtualKey)
+    {
+        if (NativeMethods.IsKeyDown(virtualKey))
+            Send([Key(virtualKey, keyUp: true, extended: false)]);
     }
 
     internal static bool TypePinyin(string keystrokes)

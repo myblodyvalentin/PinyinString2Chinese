@@ -16,6 +16,8 @@ internal static class NativeMethods
     internal const int WmGetTextLength = 0x000E;
     internal const int EmGetSel = 0x00B0;
     internal const int EmReplaceSel = 0x00C2;
+    internal const int EmExGetSel = 0x0400 + 52;
+    internal const int EmGetTextRange = 0x0400 + 75;
 
     internal const int ImcGetConversionMode = 0x0001;
     internal const int ImcSetConversionMode = 0x0002;
@@ -192,6 +194,26 @@ internal static class NativeMethods
 
     [DllImport("user32.dll", EntryPoint = "SendMessageW")]
     internal static extern IntPtr SendMessageSel(IntPtr hWnd, int msg, ref int wParam, ref int lParam);
+
+    [DllImport("user32.dll", EntryPoint = "SendMessageW")]
+    internal static extern IntPtr SendMessageCharRange(IntPtr hWnd, int msg, IntPtr wParam, ref CHARRANGE range);
+
+    [DllImport("user32.dll", EntryPoint = "SendMessageW")]
+    internal static extern IntPtr SendMessageTextRange(IntPtr hWnd, int msg, IntPtr wParam, ref TEXTRANGEW range);
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct CHARRANGE
+    {
+        public int Min;
+        public int Max;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TEXTRANGEW
+    {
+        public CHARRANGE Range;
+        public IntPtr Text;
+    }
 
     [DllImport("imm32.dll")]
     internal static extern IntPtr ImmGetDefaultIMEWnd(IntPtr hWnd);

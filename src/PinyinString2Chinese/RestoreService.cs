@@ -80,6 +80,8 @@ internal sealed class RestoreWorker
         var parsed = PinyinParser.Parse(captured.Text);
         if (parsed == null || !PinyinParser.Allows(parsed, job.Kind))
         {
+            var shown = captured.Text.Length > 24 ? captured.Text[..24] + "…" : captured.Text;
+            AppLog.Info($"选区不能还原：{shown}");
             if (job.Kind == TriggerKind.Manual)
                 Report("选中的不是纯英文字符串。", balloon: true);
             return;
@@ -152,30 +154,43 @@ internal sealed class RestoreWorker
 
     private static CapturedText? ReadSettledSelection(TriggerKind kind)
     {
-        // 松开鼠标时，微信等程序往往还没把选区提交出来。先等一等再读。
+        // 松开鼠标时，记事本和微信往往还没把最终选区提交出来。
+        // 第一次读到的可能只是半截，必须看到连续两次相同内容才采用。
         Thread.Sleep(kind == TriggerKind.Manual ? 20 : 40);
         var started = Environment.TickCount64;
         var passes = 0;
+        var stability = new SelectionStability();
+        CapturedText? pending = null;
         while (true)
         {
             passes++;
             var attempt = SelectionReader.TryRead(allowClipboard: false);
-            if (attempt.Text != null)
-            {
-                if (passes > 1)
-                    AppLog.Info($"选区在第 {passes} 次读取时就绪");
-                return attempt.Text;
-            }
-
             if (attempt.Follow == SelectionFollow.Stop)
                 return null;
 
-            var elapsed = Environment.TickCount64 - started;
-            if (attempt.Follow == SelectionFollow.Copy || elapsed >= 420)
+            if (attempt.Text != null)
             {
-                var minimum = attempt.Follow == SelectionFollow.Copy && kind != TriggerKind.Manual ? 260 : 0;
-                if (elapsed < minimum)
-                    Thread.Sleep((int)(minimum - elapsed));
+                pending = attempt.Text;
+                if (stability.IsStable(attempt.Text.Text))
+                {
+                    if (passes > 2)
+                        AppLog.Info($"选区在第 {passes} 次读取时就绪");
+                    return attempt.Text;
+                }
+            }
+
+            var elapsed = Environment.TickCount64 - started;
+            var copyReady = attempt.Follow == SelectionFollow.Copy && elapsed >= (kind == TriggerKind.Manual ? 0 : 260);
+            if (copyReady || elapsed >= 560)
+            {
+                if (pending != null)
+                    return ConfirmPending(pending);
+
+                if (attempt.Follow != SelectionFollow.Copy && elapsed < 560)
+                {
+                    Thread.Sleep(50);
+                    continue;
+                }
 
                 var copied = SelectionReader.TryRead(allowClipboard: true);
                 if (copied.Text != null && passes > 1)
@@ -183,8 +198,27 @@ internal sealed class RestoreWorker
                 return copied.Text;
             }
 
-            Thread.Sleep(45);
+            Thread.Sleep(50);
         }
+    }
+
+    private static CapturedText ConfirmPending(CapturedText pending)
+    {
+        Thread.Sleep(70);
+        var again = SelectionReader.TryRead(allowClipboard: false);
+        if (again.Follow == SelectionFollow.Stop || again.Text == null)
+            return pending;
+
+        var chosen = SelectionStability.Prefer(pending.Text, again.Text.Text);
+        if (chosen == pending.Text)
+            return pending;
+
+        return new CapturedText
+        {
+            Text = chosen,
+            Probe = again.Text.Probe,
+            Clear = again.Text.Clear,
+        };
     }
 
     private static bool Clear(CapturedText captured)
