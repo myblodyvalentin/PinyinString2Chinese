@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>PinyinString2Chinese</RootNamespace>
+    <AssemblyName>PinyinString2Chinese</AssemblyName>
+    <Product>拼音还原</Product>
+    <AssemblyTitle>拼音还原</AssemblyTitle>
+    <Description>框选误提交的拼音，清除原文并送入指定的中文输入法。</Description>
+    <Version>1.0.0</Version>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <StartupObject>PinyinString2Chinese.Program</StartupObject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="PinyinParserTests" />
+  </ItemGroup>
+</Project>
